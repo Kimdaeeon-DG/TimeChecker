@@ -171,20 +171,25 @@ class DatabaseManager {
         let calendar = Calendar.current
         let dateFormatter = ISO8601DateFormatter()
         
+        // 해당 날짜의 시작과 끝을 계산
         let startOfDay = calendar.startOfDay(for: date)
         let endOfDay = calendar.date(byAdding: .day, value: 1, to: startOfDay)!
         
         let queryString = """
             SELECT id, check_in, check_out 
             FROM work_time 
-            WHERE date(check_in) = date(?)
+            WHERE datetime(check_in) >= datetime(?) 
+            AND datetime(check_in) < datetime(?)
             ORDER BY check_in DESC;
         """
         
         var queryStatement: OpaquePointer?
         if sqlite3_prepare_v2(db, queryString, -1, &queryStatement, nil) == SQLITE_OK {
-            let dateString = dateFormatter.string(from: date)
-            sqlite3_bind_text(queryStatement, 1, (dateString as NSString).utf8String, -1, nil)
+            let startDateString = dateFormatter.string(from: startOfDay)
+            let endDateString = dateFormatter.string(from: endOfDay)
+            
+            sqlite3_bind_text(queryStatement, 1, (startDateString as NSString).utf8String, -1, nil)
+            sqlite3_bind_text(queryStatement, 2, (endDateString as NSString).utf8String, -1, nil)
             
             while sqlite3_step(queryStatement) == SQLITE_ROW {
                 let id = sqlite3_column_int(queryStatement, 0)

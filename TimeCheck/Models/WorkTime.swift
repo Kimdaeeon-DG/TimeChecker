@@ -14,6 +14,6 @@ struct WorkTime: Identifiable {
         guard let duration = duration else { return nil }
         let hours = Int(duration) / 3600
         let minutes = Int(duration) % 3600 / 60
-        return String(format: "%02d:%02d", hours, minutes)
+        return String(format: "%d시간 %d분", hours, minutes)
     }
 }

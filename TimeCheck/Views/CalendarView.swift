@@ -12,21 +12,21 @@ struct CalendarView: View {
         return formatter
     }()
     
-    private var weeks: [[Date?]] {
+    private var weeks: [[DateItem]] {
         let monthInterval = calendar.dateInterval(of: .month, for: selectedDate)!
         let firstWeekday = calendar.component(.weekday, from: monthInterval.start)
         let daysInMonth = calendar.range(of: .day, in: .month, for: selectedDate)!.count
         
-        var dates: [Date?] = Array(repeating: nil, count: firstWeekday - 1)
+        var dates: [DateItem] = Array(repeating: DateItem(id: UUID(), date: nil), count: firstWeekday - 1)
         
         for day in 1...daysInMonth {
             if let date = calendar.date(byAdding: .day, value: day - 1, to: monthInterval.start) {
-                dates.append(date)
+                dates.append(DateItem(id: UUID(), date: date))
             }
         }
         
         while dates.count % daysInWeek != 0 {
-            dates.append(nil)
+            dates.append(DateItem(id: UUID(), date: nil))
         }
         
         return dates.chunked(into: daysInWeek)
@@ -59,12 +59,12 @@ struct CalendarView: View {
             
             ForEach(weeks, id: \.self) { week in
                 HStack {
-                    ForEach(week, id: \.self) { date in
-                        if let date = date {
+                    ForEach(week, id: \.id) { item in
+                        if let date = item.date {
                             DayCell(
                                 date: date,
                                 isSelected: calendar.isDate(date, inSameDayAs: selectedDate),
-                                workTimes: workTimes[date] ?? []
+                                workTimes: workTimes[calendar.startOfDay(for: date)] ?? []
                             )
                             .onTapGesture {
                                 selectedDate = date
@@ -84,6 +84,19 @@ struct CalendarView: View {
         if let newDate = calendar.date(byAdding: .month, value: value, to: selectedDate) {
             selectedDate = newDate
         }
+    }
+}
+
+struct DateItem: Identifiable, Hashable {
+    let id: UUID
+    let date: Date?
+    
+    func hash(into hasher: inout Hasher) {
+        hasher.combine(id)
+    }
+    
+    static func == (lhs: DateItem, rhs: DateItem) -> Bool {
+        lhs.id == rhs.id
     }
 }
 
@@ -125,6 +138,14 @@ extension Array {
     func chunked(into size: Int) -> [[Element]] {
         stride(from: 0, to: count, by: size).map {
             Array(self[$0..<Swift.min($0 + size, count)])
+        }
+    }
+}
+
+extension Array: Hashable where Element: Hashable {
+    public func hash(into hasher: inout Hasher) {
+        for element in self {
+            hasher.combine(element)
         }
     }
 }

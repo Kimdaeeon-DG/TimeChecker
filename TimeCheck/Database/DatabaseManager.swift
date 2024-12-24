@@ -167,47 +167,55 @@ class DatabaseManager {
     }
     
     func getWorkTimeForDate(_ date: Date) -> [WorkTime] {
-        var workTimes: [WorkTime] = []
         let calendar = Calendar.current
-        let dateFormatter = ISO8601DateFormatter()
-        
-        // 해당 날짜의 시작과 끝을 계산
         let startOfDay = calendar.startOfDay(for: date)
         let endOfDay = calendar.date(byAdding: .day, value: 1, to: startOfDay)!
         
-        let queryString = """
-            SELECT id, check_in, check_out 
-            FROM work_time 
-            WHERE datetime(check_in) >= datetime(?) 
-            AND datetime(check_in) < datetime(?)
-            ORDER BY check_in DESC;
-        """
+        var workTimes: [WorkTime] = []
+        let query = "SELECT * FROM work_time WHERE check_in < ? AND (check_out IS NULL OR check_out > ?)"
         
-        var queryStatement: OpaquePointer?
-        if sqlite3_prepare_v2(db, queryString, -1, &queryStatement, nil) == SQLITE_OK {
-            let startDateString = dateFormatter.string(from: startOfDay)
-            let endDateString = dateFormatter.string(from: endOfDay)
-            
-            sqlite3_bind_text(queryStatement, 1, (startDateString as NSString).utf8String, -1, nil)
-            sqlite3_bind_text(queryStatement, 2, (endDateString as NSString).utf8String, -1, nil)
-            
-            while sqlite3_step(queryStatement) == SQLITE_ROW {
-                let id = sqlite3_column_int(queryStatement, 0)
+        if let db = db {
+            do {
+                let statement = try db.prepareStatement(query: query)
+                try statement.bind([endOfDay, startOfDay])
                 
-                guard let checkInStr = sqlite3_column_text(queryStatement, 1) else { continue }
-                let checkIn = dateFormatter.date(from: String(cString: checkInStr))!
-                
-                var checkOut: Date? = nil
-                if let checkOutStr = sqlite3_column_text(queryStatement, 2) {
-                    checkOut = dateFormatter.date(from: String(cString: checkOutStr))
+                while try statement.step() {
+                    if let workTime = try statement.WorkTime() {
+                        // 날짜를 걸쳐 있는 경우 시간을 분할
+                        if calendar.isDate(workTime.checkIn, inSameDayAs: date) {
+                            let endTime: Date
+                            if let checkOut = workTime.checkOut {
+                                if calendar.isDate(checkOut, inSameDayAs: date) {
+                                    endTime = checkOut
+                                } else {
+                                    endTime = calendar.date(byAdding: .day, value: 1, to: startOfDay)!
+                                }
+                            } else {
+                                endTime = Date()
+                            }
+                            
+                            let adjustedWorkTime = WorkTime(
+                                id: workTime.id,
+                                checkIn: workTime.checkIn,
+                                checkOut: endTime
+                            )
+                            workTimes.append(adjustedWorkTime)
+                        } else if let checkOut = workTime.checkOut,
+                                  calendar.isDate(checkOut, inSameDayAs: date) {
+                            let adjustedWorkTime = WorkTime(
+                                id: workTime.id,
+                                checkIn: startOfDay,
+                                checkOut: checkOut
+                            )
+                            workTimes.append(adjustedWorkTime)
+                        }
+                    }
                 }
-                
-                let workTime = WorkTime(id: Int(id), checkIn: checkIn, checkOut: checkOut)
-                workTimes.append(workTime)
+            } catch {
+                print("Error fetching work times: \(error)")
             }
         }
-        sqlite3_finalize(queryStatement)
         
-        return workTimes
+        return workTimes.sorted { $0.checkIn > $1.checkIn }
     }
 }

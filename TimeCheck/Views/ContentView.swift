@@ -106,8 +106,10 @@ struct ContentView: View {
         .onAppear {
             updateData()
         }
-        .onChange(of: selectedDate) { _ in
-            updateData()
+        .onChange(of: selectedDate) { oldValue, newValue in
+            if oldValue != newValue {
+                updateData()
+            }
         }
     }
     
@@ -174,25 +176,6 @@ struct WorkTimeRow: View {
         let formatter = DateFormatter()
         formatter.dateFormat = "MM/dd HH:mm"
         return formatter.string(from: date)
-    }
-}
-
-struct ProgressBarView: View {
-    let value: Double
-    let total: Double
-    
-    var body: some View {
-        ZStack(alignment: .leading) {
-            Rectangle()
-                .frame(height: 10)
-                .foregroundColor(.gray)
-                .opacity(0.3)
-            
-            Rectangle()
-                .frame(width: UIScreen.main.bounds.width * CGFloat(value / total), height: 10)
-                .foregroundColor(.blue)
-        }
-        .cornerRadius(5)
     }
 }
 

@@ -34,13 +34,13 @@ struct ProgressBarView: View {
     
     private var progressColor: Color {
         if percentage < 50 {
-            return .blue
-        } else if percentage < 80 {
-            return .green
-        } else if percentage < 100 {
-            return .orange
-        } else {
             return .red
+        } else if percentage < 80 {
+            return .orange
+        } else if percentage < 100 {
+            return .green
+        } else {
+            return .blue
         }
     }
 }

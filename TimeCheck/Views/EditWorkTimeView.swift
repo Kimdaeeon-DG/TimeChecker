@@ -4,7 +4,7 @@ struct EditWorkTimeView: View {
     let workTime: WorkTime
     @Binding var isPresented: Bool
     @State private var checkInDate: Date
-    @State private var checkOutDate: Date
+    @State private var checkOutDate: Date 
     var onSave: () -> Void
     
     init(workTime: WorkTime, isPresented: Binding<Bool>, onSave: @escaping () -> Void) {
@@ -36,11 +36,14 @@ struct EditWorkTimeView: View {
                     isPresented = false
                 },
                 trailing: Button("저장") {
-                    DatabaseManager.shared.updateWorkTime(
+                    // 새로운 WorkTime 객체 생성
+                    let updatedWorkTime = WorkTime(
                         id: workTime.id,
                         checkIn: checkInDate,
                         checkOut: checkOutDate
                     )
+                    // 업데이트 메서드 호출
+                    DatabaseManager.shared.updateWorkTime(updatedWorkTime)
                     onSave()
                     isPresented = false
                 }

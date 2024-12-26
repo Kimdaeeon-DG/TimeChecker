@@ -37,44 +37,87 @@ class DatabaseManager {
     }
     
     func checkIn() {
-        let insertStatementString = "INSERT INTO work_time (check_in) VALUES (?);"
-        var insertStatement: OpaquePointer?
+        let queryString = "INSERT INTO work_time (check_in) VALUES (?);"
+        var statement: OpaquePointer?
         
-        if sqlite3_prepare_v2(db, insertStatementString, -1, &insertStatement, nil) == SQLITE_OK {
+        if sqlite3_prepare_v2(db, queryString, -1, &statement, nil) == SQLITE_OK {
             let now = Date()
             let dateString = ISO8601DateFormatter().string(from: now)
-            sqlite3_bind_text(insertStatement, 1, (dateString as NSString).utf8String, -1, nil)
+            sqlite3_bind_text(statement, 1, (dateString as NSString).utf8String, -1, nil)
             
-            if sqlite3_step(insertStatement) == SQLITE_DONE {
-                print("Successfully inserted check-in time")
+            if sqlite3_step(statement) != SQLITE_DONE {
+                print("Error inserting new check-in")
             }
         }
-        sqlite3_finalize(insertStatement)
+        
+        sqlite3_finalize(statement)
     }
     
     func checkOut() {
-        let updateStatementString = """
+        let queryString = """
             UPDATE work_time 
             SET check_out = ? 
-            WHERE id = (SELECT id FROM work_time WHERE check_out IS NULL ORDER BY check_in DESC LIMIT 1);
+            WHERE id = (
+                SELECT id FROM work_time 
+                WHERE check_out IS NULL 
+                ORDER BY check_in DESC 
+                LIMIT 1
+            );
         """
-        var updateStatement: OpaquePointer?
+        var statement: OpaquePointer?
         
-        if sqlite3_prepare_v2(db, updateStatementString, -1, &updateStatement, nil) == SQLITE_OK {
+        if sqlite3_prepare_v2(db, queryString, -1, &statement, nil) == SQLITE_OK {
             let now = Date()
             let dateString = ISO8601DateFormatter().string(from: now)
-            sqlite3_bind_text(updateStatement, 1, (dateString as NSString).utf8String, -1, nil)
+            sqlite3_bind_text(statement, 1, (dateString as NSString).utf8String, -1, nil)
             
-            if sqlite3_step(updateStatement) == SQLITE_DONE {
-                print("Successfully inserted check-out time")
+            if sqlite3_step(statement) != SQLITE_DONE {
+                print("Error updating check-out")
             }
         }
-        sqlite3_finalize(updateStatement)
+        
+        sqlite3_finalize(statement)
+    }
+    
+    func getAllWorkTimes() -> [WorkTime] {
+        var workTimes: [WorkTime] = []
+        let dateFormatter = ISO8601DateFormatter()
+        
+        let queryString = """
+            SELECT id, check_in, check_out 
+            FROM work_time 
+            ORDER BY check_in DESC;
+        """
+        
+        var statement: OpaquePointer?
+        
+        if sqlite3_prepare_v2(db, queryString, -1, &statement, nil) == SQLITE_OK {
+            while sqlite3_step(statement) == SQLITE_ROW {
+                let id = Int(sqlite3_column_int(statement, 0))
+                
+                if let checkInStr = sqlite3_column_text(statement, 1) {
+                    let checkInString = String(cString: checkInStr)
+                    if let checkIn = dateFormatter.date(from: checkInString) {
+                        var checkOut: Date? = nil
+                        
+                        if let checkOutStr = sqlite3_column_text(statement, 2) {
+                            let checkOutString = String(cString: checkOutStr)
+                            checkOut = dateFormatter.date(from: checkOutString)
+                        }
+                        
+                        let workTime = WorkTime(id: id, checkIn: checkIn, checkOut: checkOut)
+                        workTimes.append(workTime)
+                    }
+                }
+            }
+        }
+        
+        sqlite3_finalize(statement)
+        return workTimes
     }
     
     func getMonthlyWorkTimes() -> [WorkTime] {
         var workTimes: [WorkTime] = []
-        let calendar = Calendar.current
         let dateFormatter = ISO8601DateFormatter()
         
         let queryString = """
@@ -84,138 +127,256 @@ class DatabaseManager {
             ORDER BY check_in DESC;
         """
         
-        var queryStatement: OpaquePointer?
-        if sqlite3_prepare_v2(db, queryString, -1, &queryStatement, nil) == SQLITE_OK {
-            while sqlite3_step(queryStatement) == SQLITE_ROW {
-                let id = sqlite3_column_int(queryStatement, 0)
+        var statement: OpaquePointer?
+        
+        if sqlite3_prepare_v2(db, queryString, -1, &statement, nil) == SQLITE_OK {
+            while sqlite3_step(statement) == SQLITE_ROW {
+                let id = Int(sqlite3_column_int(statement, 0))
                 
-                guard let checkInStr = sqlite3_column_text(queryStatement, 1) else { continue }
-                let checkIn = dateFormatter.date(from: String(cString: checkInStr))!
-                
-                var checkOut: Date? = nil
-                if let checkOutStr = sqlite3_column_text(queryStatement, 2) {
-                    checkOut = dateFormatter.date(from: String(cString: checkOutStr))
+                if let checkInStr = sqlite3_column_text(statement, 1) {
+                    let checkInString = String(cString: checkInStr)
+                    if let checkIn = dateFormatter.date(from: checkInString) {
+                        var checkOut: Date? = nil
+                        
+                        if let checkOutStr = sqlite3_column_text(statement, 2) {
+                            let checkOutString = String(cString: checkOutStr)
+                            checkOut = dateFormatter.date(from: checkOutString)
+                        }
+                        
+                        let workTime = WorkTime(id: id, checkIn: checkIn, checkOut: checkOut)
+                        workTimes.append(workTime)
+                    }
                 }
-                
-                let workTime = WorkTime(id: Int(id), checkIn: checkIn, checkOut: checkOut)
-                workTimes.append(workTime)
             }
         }
-        sqlite3_finalize(queryStatement)
         
+        sqlite3_finalize(statement)
         return workTimes
     }
     
-    func getTotalMonthlyHours() -> Double {
-        let workTimes = getMonthlyWorkTimes()
-        let totalSeconds = workTimes.compactMap { $0.duration }.reduce(0, +)
-        return totalSeconds / 3600 // Convert to hours
-    }
-    
-    func updateWorkTime(id: Int, checkIn: Date?, checkOut: Date?) {
-        var updateStatementString = "UPDATE work_time SET"
-        var bindings: [(Int, Any)] = []
-        
-        if let checkIn = checkIn {
-            updateStatementString += " check_in = ?,"
-            bindings.append((bindings.count + 1, ISO8601DateFormatter().string(from: checkIn)))
-        }
-        
-        if let checkOut = checkOut {
-            updateStatementString += " check_out = ?,"
-            bindings.append((bindings.count + 1, ISO8601DateFormatter().string(from: checkOut)))
-        }
-        
-        // Remove trailing comma
-        updateStatementString = String(updateStatementString.dropLast())
-        updateStatementString += " WHERE id = ?"
-        bindings.append((bindings.count + 1, id))
-        
-        var updateStatement: OpaquePointer?
-        
-        if sqlite3_prepare_v2(db, updateStatementString, -1, &updateStatement, nil) == SQLITE_OK {
-            for (index, value) in bindings {
-                switch value {
-                case let stringValue as String:
-                    sqlite3_bind_text(updateStatement, Int32(index), (stringValue as NSString).utf8String, -1, nil)
-                case let intValue as Int:
-                    sqlite3_bind_int(updateStatement, Int32(index), Int32(intValue))
-                default:
-                    break
-                }
-            }
-            
-            if sqlite3_step(updateStatement) == SQLITE_DONE {
-                print("Successfully updated work time")
-            }
-        }
-        sqlite3_finalize(updateStatement)
-    }
-    
-    func deleteWorkTime(id: Int) {
-        let deleteStatementString = "DELETE FROM work_time WHERE id = ?;"
-        var deleteStatement: OpaquePointer?
-        
-        if sqlite3_prepare_v2(db, deleteStatementString, -1, &deleteStatement, nil) == SQLITE_OK {
-            sqlite3_bind_int(deleteStatement, 1, Int32(id))
-            
-            if sqlite3_step(deleteStatement) == SQLITE_DONE {
-                print("Successfully deleted work time")
-            }
-        }
-        sqlite3_finalize(deleteStatement)
-    }
-    
     func getWorkTimeForDate(_ date: Date) -> [WorkTime] {
+        var workTimes: [WorkTime] = []
         let calendar = Calendar.current
+        let dateFormatter = ISO8601DateFormatter()
+        
         let startOfDay = calendar.startOfDay(for: date)
         let endOfDay = calendar.date(byAdding: .day, value: 1, to: startOfDay)!
         
-        var workTimes: [WorkTime] = []
-        let query = "SELECT * FROM work_time WHERE check_in < ? AND (check_out IS NULL OR check_out > ?)"
+        let queryString = """
+            SELECT id, check_in, check_out 
+            FROM work_time 
+            WHERE check_in >= ? AND check_in < ? 
+            ORDER BY check_in DESC;
+        """
         
-        if let db = db {
-            do {
-                let statement = try db.prepareStatement(query: query)
-                try statement.bind([endOfDay, startOfDay])
+        var statement: OpaquePointer?
+        
+        if sqlite3_prepare_v2(db, queryString, -1, &statement, nil) == SQLITE_OK {
+            let startStr = dateFormatter.string(from: startOfDay)
+            let endStr = dateFormatter.string(from: endOfDay)
+            
+            sqlite3_bind_text(statement, 1, (startStr as NSString).utf8String, -1, nil)
+            sqlite3_bind_text(statement, 2, (endStr as NSString).utf8String, -1, nil)
+            
+            while sqlite3_step(statement) == SQLITE_ROW {
+                let id = Int(sqlite3_column_int(statement, 0))
                 
-                while try statement.step() {
-                    if let workTime = try statement.WorkTime() {
-                        // 날짜를 걸쳐 있는 경우 시간을 분할
-                        if calendar.isDate(workTime.checkIn, inSameDayAs: date) {
-                            let endTime: Date
-                            if let checkOut = workTime.checkOut {
-                                if calendar.isDate(checkOut, inSameDayAs: date) {
-                                    endTime = checkOut
-                                } else {
-                                    endTime = calendar.date(byAdding: .day, value: 1, to: startOfDay)!
-                                }
-                            } else {
-                                endTime = Date()
-                            }
-                            
-                            let adjustedWorkTime = WorkTime(
-                                id: workTime.id,
-                                checkIn: workTime.checkIn,
-                                checkOut: endTime
-                            )
-                            workTimes.append(adjustedWorkTime)
-                        } else if let checkOut = workTime.checkOut,
-                                  calendar.isDate(checkOut, inSameDayAs: date) {
-                            let adjustedWorkTime = WorkTime(
-                                id: workTime.id,
-                                checkIn: startOfDay,
-                                checkOut: checkOut
-                            )
-                            workTimes.append(adjustedWorkTime)
+                if let checkInStr = sqlite3_column_text(statement, 1) {
+                    let checkInString = String(cString: checkInStr)
+                    if let checkIn = dateFormatter.date(from: checkInString) {
+                        var checkOut: Date? = nil
+                        
+                        if let checkOutStr = sqlite3_column_text(statement, 2) {
+                            let checkOutString = String(cString: checkOutStr)
+                            checkOut = dateFormatter.date(from: checkOutString)
                         }
+                        
+                        let workTime = WorkTime(id: id, checkIn: checkIn, checkOut: checkOut)
+                        workTimes.append(workTime)
                     }
                 }
-            } catch {
-                print("Error fetching work times: \(error)")
             }
         }
         
-        return workTimes.sorted { $0.checkIn > $1.checkIn }
+        sqlite3_finalize(statement)
+        return workTimes
+    }
+    
+    func deleteWorkTime(id: Int) {
+        let queryString = "DELETE FROM work_time WHERE id = ?;"
+        var statement: OpaquePointer?
+        
+        if sqlite3_prepare_v2(db, queryString, -1, &statement, nil) == SQLITE_OK {
+            sqlite3_bind_int(statement, 1, Int32(id))
+            
+            if sqlite3_step(statement) != SQLITE_DONE {
+                print("Error deleting work time")
+            }
+        }
+        
+        sqlite3_finalize(statement)
+    }
+    
+    func updateWorkTime(_ workTime: WorkTime) {
+        let queryString = """
+            UPDATE work_time 
+            SET check_in = ?, check_out = ? 
+            WHERE id = ?;
+        """
+        var statement: OpaquePointer?
+        
+        if sqlite3_prepare_v2(db, queryString, -1, &statement, nil) == SQLITE_OK {
+            let dateFormatter = ISO8601DateFormatter()
+            let checkInStr = dateFormatter.string(from: workTime.checkIn)
+            
+            sqlite3_bind_text(statement, 1, (checkInStr as NSString).utf8String, -1, nil)
+            
+            if let checkOut = workTime.checkOut {
+                let checkOutStr = dateFormatter.string(from: checkOut)
+                sqlite3_bind_text(statement, 2, (checkOutStr as NSString).utf8String, -1, nil)
+            } else {
+                sqlite3_bind_null(statement, 2)
+            }
+            
+            sqlite3_bind_int(statement, 3, Int32(workTime.id))
+            
+            if sqlite3_step(statement) != SQLITE_DONE {
+                print("Error updating work time")
+            }
+        }
+        
+        sqlite3_finalize(statement)
+    }
+    
+    func importWorkTime(_ workTime: WorkTime) {
+        let queryString = """
+            INSERT INTO work_time (id, check_in, check_out) 
+            VALUES (?, ?, ?);
+        """
+        var statement: OpaquePointer?
+        
+        if sqlite3_prepare_v2(db, queryString, -1, &statement, nil) == SQLITE_OK {
+            let dateFormatter = ISO8601DateFormatter()
+            let checkInStr = dateFormatter.string(from: workTime.checkIn)
+            
+            sqlite3_bind_int(statement, 1, Int32(workTime.id))
+            sqlite3_bind_text(statement, 2, (checkInStr as NSString).utf8String, -1, nil)
+            
+            if let checkOut = workTime.checkOut {
+                let checkOutStr = dateFormatter.string(from: checkOut)
+                sqlite3_bind_text(statement, 3, (checkOutStr as NSString).utf8String, -1, nil)
+            } else {
+                sqlite3_bind_null(statement, 3)
+            }
+            
+            if sqlite3_step(statement) != SQLITE_DONE {
+                print("Error importing work time")
+            }
+        }
+        
+        sqlite3_finalize(statement)
+    }
+    
+    func deleteAllWorkTimes() {
+        let queryString = "DELETE FROM work_time;"
+        var statement: OpaquePointer?
+        
+        if sqlite3_prepare_v2(db, queryString, -1, &statement, nil) == SQLITE_OK {
+            if sqlite3_step(statement) != SQLITE_DONE {
+                print("Error deleting all work times")
+            }
+        }
+        
+        sqlite3_finalize(statement)
+    }
+    
+    func getTotalHoursForMonth(_ date: Date) -> Double {
+        let calendar = Calendar.current
+        let startOfMonth = calendar.date(from: calendar.dateComponents([.year, .month], from: date))!
+        let nextMonth = calendar.date(byAdding: .month, value: 1, to: startOfMonth)!
+        
+        let workTimes = getWorkTimesBetween(start: startOfMonth, end: nextMonth)
+        let totalSeconds = workTimes.compactMap { $0.duration }.reduce(0, +)
+        return totalSeconds / 3600.0
+    }
+    
+    func getWorkTimesBetween(start: Date, end: Date) -> [WorkTime] {
+        var workTimes: [WorkTime] = []
+        let dateFormatter = ISO8601DateFormatter()
+        
+        let queryString = """
+            SELECT id, check_in, check_out
+            FROM work_time
+            WHERE check_in >= ? AND check_in < ?
+            ORDER BY check_in DESC
+        """
+        
+        var statement: OpaquePointer?
+        
+        if sqlite3_prepare_v2(db, queryString, -1, &statement, nil) == SQLITE_OK {
+            let startStr = dateFormatter.string(from: start)
+            let endStr = dateFormatter.string(from: end)
+            
+            sqlite3_bind_text(statement, 1, (startStr as NSString).utf8String, -1, nil)
+            sqlite3_bind_text(statement, 2, (endStr as NSString).utf8String, -1, nil)
+            
+            while sqlite3_step(statement) == SQLITE_ROW {
+                let id = Int(sqlite3_column_int(statement, 0))
+                
+                if let checkInStr = sqlite3_column_text(statement, 1) {
+                    let checkInString = String(cString: checkInStr)
+                    if let checkIn = dateFormatter.date(from: checkInString) {
+                        var checkOut: Date? = nil
+                        
+                        if let checkOutStr = sqlite3_column_text(statement, 2) {
+                            let checkOutString = String(cString: checkOutStr)
+                            checkOut = dateFormatter.date(from: checkOutString)
+                        }
+                        
+                        let workTime = WorkTime(id: id, checkIn: checkIn, checkOut: checkOut)
+                        workTimes.append(workTime)
+                    }
+                }
+            }
+        }
+        
+        sqlite3_finalize(statement)
+        return workTimes
+    }
+    
+    func getLatestWorkTime() -> WorkTime? {
+        let queryString = """
+            SELECT id, check_in, check_out 
+            FROM work_time 
+            ORDER BY check_in DESC 
+            LIMIT 1;
+        """
+        
+        var statement: OpaquePointer?
+        var workTime: WorkTime? = nil
+        let dateFormatter = ISO8601DateFormatter()
+        
+        if sqlite3_prepare_v2(db, queryString, -1, &statement, nil) == SQLITE_OK {
+            if sqlite3_step(statement) == SQLITE_ROW {
+                let id = Int(sqlite3_column_int(statement, 0))
+                
+                if let checkInStr = sqlite3_column_text(statement, 1) {
+                    let checkInString = String(cString: checkInStr)
+                    if let checkIn = dateFormatter.date(from: checkInString) {
+                        var checkOut: Date? = nil
+                        
+                        if let checkOutStr = sqlite3_column_text(statement, 2) {
+                            let checkOutString = String(cString: checkOutStr)
+                            checkOut = dateFormatter.date(from: checkOutString)
+                        }
+                        
+                        workTime = WorkTime(id: id, checkIn: checkIn, checkOut: checkOut)
+                    }
+                }
+            }
+        }
+        
+        sqlite3_finalize(statement)
+        return workTime
     }
 }

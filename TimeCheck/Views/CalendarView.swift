@@ -90,13 +90,13 @@ struct CalendarView: View {
 struct DateItem: Identifiable, Hashable {
     let id: UUID
     let date: Date?
-    
-    func hash(into hasher: inout Hasher) {
-        hasher.combine(id)
-    }
-    
-    static func == (lhs: DateItem, rhs: DateItem) -> Bool {
-        lhs.id == rhs.id
+}
+
+extension Array {
+    func chunked(into size: Int) -> [[Element]] {
+        stride(from: 0, to: count, by: size).map {
+            Array(self[$0..<Swift.min($0 + size, count)])
+        }
     }
 }
 
@@ -131,27 +131,5 @@ struct DayCell: View {
     private func isWeekend(_ date: Date) -> Bool {
         let weekday = calendar.component(.weekday, from: date)
         return weekday == 1 || weekday == 7
-    }
-}
-
-extension Array {
-    func chunked(into size: Int) -> [[Element]] {
-        stride(from: 0, to: count, by: size).map {
-            Array(self[$0..<Swift.min($0 + size, count)])
-        }
-    }
-}
-
-extension Array: Hashable where Element: Hashable {
-    public func hash(into hasher: inout Hasher) {
-        for element in self {
-            hasher.combine(element)
-        }
-    }
-}
-
-extension Date: Hashable {
-    public func hash(into hasher: inout Hasher) {
-        hasher.combine(timeIntervalSince1970)
     }
 }

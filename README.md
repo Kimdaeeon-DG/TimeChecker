@@ -34,7 +34,7 @@ TimeTracker는 iOS용 근무 시간 관리 앱입니다. SwiftUI로 개발되었
 
 1. 프로젝트를 클론합니다:
 ```bash
-git clone [repository URL]
+git clone https://github.com/Kimdaeeon-DG/TimeTracker.git
 ```
 
 2. Xcode로 프로젝트를 엽니다.
